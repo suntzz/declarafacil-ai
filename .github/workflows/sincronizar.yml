@@ -1,0 +1,53 @@
+# Trae solo los cambios del repo de Miguel (Miguel-Rogelis/declarafacil-ai) a este fork.
+# Cada 3 horas, o a mano desde Actions → «Sincronizar con Miguel» → Run workflow.
+# Si hay algo nuevo, actualiza main y vuelve a publicar GitHub Pages y a correr las pruebas.
+# Si los cambios chocan con algo de este repo, no toca nada y la tarea queda en rojo (GitHub te avisa por correo).
+
+name: Sincronizar con Miguel
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: sincronizar
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    # Solo en el fork: en el repo de Miguel no hace nada
+    if: github.repository == 'suntzz/declarafacil-ai'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Traer los cambios de Miguel
+        id: traer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! respuesta=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/merge-upstream" -f branch=main 2>&1); then
+            echo "::error::No pude traer los cambios de Miguel (puede haber un choque, o cambios en .github/workflows que la tarea no tiene permiso de copiar). Usa «Sync fork» en GitHub o pídeselo a Claude. Detalle: ${respuesta}"
+            exit 1
+          fi
+          echo "$respuesta"
+          tipo=$(echo "$respuesta" | jq -r '.merge_type // "none"')
+          echo "tipo=$tipo" >> "$GITHUB_OUTPUT"
+          if [ "$tipo" = "none" ]; then
+            echo "### Sin cambios nuevos en el repo de Miguel" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Traje los cambios de Miguel ($tipo)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Un push hecho por esta tarea no dispara otras tareas: se lanzan a mano
+      - name: Publicar la página y correr las pruebas
+        if: steps.traer.outputs.tipo != 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run pruebas.yml --repo "$GITHUB_REPOSITORY" --ref main
